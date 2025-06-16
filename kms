@@ -1,0 +1,155 @@
+@echo off
+setlocal enabledelayedexpansion
+
+//本脚本只支持windows10/11，需要连接kms激活服务，可以连接第三方激活服务或者docker自建（推荐）
+//docker命令：docker run -d -p 1688:1688 --name kms --restart=always teddysun/kms
+
+:: 设置控制台编码为 UTF-8
+chcp 65001 >nul
+
+echo [INFO] Starting Windows KMS Activation Script...
+
+:: Step 1: 获取操作系统名称
+call :GetOsName OS_NAME
+if not defined OS_NAME (
+    echo [ERROR] Failed to detect OS Name.
+    exit /b 1
+)
+
+echo [INFO] Detected OS Name: "!OS_NAME!"
+
+:: Step 2: 标准化为统一格式（如 Windows-10-ProWorkstation）
+call :NormalizeOsType "!OS_NAME!" OS_TYPE
+echo [INFO] Normalized OS Type: "!OS_TYPE!"
+
+:: Step 3: 如果系统类型不被支持，则尝试使用 Windows 11 Pro 密钥激活
+call :SetKmsKey "!OS_TYPE!" KMS_KEY
+if not defined KMS_KEY (
+    echo [WARN] Unsupported OS Type or no key found. Falling back to Windows 11 Pro key...
+    set "KMS_KEY=W269N-WFGWX-YVC9B-4J6C9-T83GX"
+)
+
+echo [INFO] Got KMS Key: "!KMS_KEY!"
+
+set /p tsk="请输入你的KMS服务器地址(例如:520810.xyz OR 192.168.1.2):"
+echo KMS_Sev=%tsk%
+set KMS_Sev=%tsk%
+
+:: Step 0: 检查 KMS 服务器端口是否可达
+echo [ACTION] Checking network connectivity to KMS server...
+call :CheckPortConnectivity %KMS_Sev% 1688 isConnected
+if not "!isConnected!"=="TcpTestSucceeded : True" (
+    echo [ERROR] 无法连接到 KMS 服务器 %KMS_Sev%:1688，请检查网络或防火墙设置。
+    exit /b 1
+)
+echo [INFO] Successfully connected to KMS server.
+
+
+:: Step 4: 开始激活流程
+call :ActivateWithKms "!KMS_KEY!"
+
+endlocal
+exit /b 0
+
+:: === 子函数区 ===
+
+:: 检查指定 IP 和端口是否可连接
+:CheckPortConnectivity
+set "ip=%~1"
+set "port=%~2"
+set "resultVar=%~3"
+
+for /f "tokens=*" %%a in ('powershell.exe -Command "Test-NetConnection %ip% -Port %port%" ^| findstr TcpTestSucceeded') do (
+    set "%resultVar%=%%a"
+)
+
+exit /b
+
+:: 获取操作系统名称
+:GetOsName
+for /f "tokens=2 delims=:" %%a in ('systeminfo ^| findstr /i "^OS Name\|^操作系统版本"') do (
+    set "%1=%%a"
+    goto :TrimSpaces
+)
+:TrimSpaces
+set "%1=!%1:~1!"
+exit /b
+
+:: 标准化操作系统类型
+:NormalizeOsType
+set "input=%~1"
+
+:: Windows 11 中文
+if not "!input:11 专业工作站=!" == "!input!" (set "%2=Windows-11-ProWorkstation"&exit /b)
+if not "!input:11 专业版=!" == "!input!" (set "%2=Windows-11-Pro"&exit /b)
+if not "!input:11 企业版=!" == "!input!" (set "%2=Windows-11-Enterprise"&exit /b)
+
+:: Windows 10 中文
+if not "!input:10 专业工作站=!" == "!input!" (set "%2=Windows-10-ProWorkstation"&exit /b)
+if not "!input:10 专业版=!" == "!input!" (set "%2=Windows-10-Pro"&exit /b)
+if not "!input:10 企业版=!" == "!input!" (set "%2=Windows-10-Enterprise"&exit /b)
+
+:: Windows 11 英文
+if not "!input:Windows 11 Pro Workstation=!" == "!input!" (set "%2=Windows-11-ProWorkstation"&exit /b)
+if not "!input:Windows 11 Pro=!" == "!input!" (set "%2=Windows-11-Pro"&exit /b)
+if not "!input:Windows 11 Enterprise=!" == "!input!" (set "%2=Windows-11-Enterprise"&exit /b)
+
+:: Windows 10 英文
+if not "!input:Windows 10 Pro Workstation=!" == "!input!" (set "%2=Windows-10-ProWorkstation"&exit /b)
+if not "!input:Windows 10 Pro=!" == "!input!" (set "%2=Windows-10-Pro"&exit /b)
+if not "!input:Windows 10 Enterprise=!" == "!input!" (set "%2=Windows-10-Enterprise"&exit /b)
+
+:: 默认不支持
+set "%2=Unsupported"
+exit /b
+
+:: 设置对应密钥
+:SetKmsKey
+set "osType=%~1"
+
+:: Windows 11
+if "%osType%"=="Windows-11-Pro" set "%2=W269N-WFGWX-YVC9B-4J6C9-T83GX"&exit /b
+if "%osType%"=="Windows-11-ProWorkstation" set "%2=NRG8B-VKK3Q-CXVCJ-9G2XF-6Q84J"&exit /b
+if "%osType%"=="Windows-11-Enterprise" set "%2=NPPR9-FWDCX-D2C8J-H872K-2YT43"&exit /b
+
+:: Windows 10
+if "%osType%"=="Windows-10-Pro" set "%2=W269N-WFGWX-YVC9B-4J6C9-T83GX"&exit /b
+if "%osType%"=="Windows-10-ProWorkstation" set "%2=NRG8B-VKK3Q-CXVCJ-9G2XF-6Q84J"&exit /b
+if "%osType%"=="Windows-10-Enterprise" set "%2=NPPR9-FWDCX-D2C8J-H872K-2YT43"&exit /b
+
+:: 未知版本
+set "%2="
+exit /b
+
+:: 使用 KMS 激活系统
+:ActivateWithKms
+echo [ACTION] Clearing existing product key...
+cscript //nologo C:\Windows\System32\slmgr.vbs -upk
+
+
+echo [ACTION] Installing new product key...
+cscript //nologo C:\Windows\System32\slmgr.vbs -ipk %~1
+if %errorlevel% neq 0 (
+    echo [ERROR] 密钥安装失败，请检查密钥是否有效
+    exit /b 1
+)
+
+echo [ACTION] Setting KMS server...
+cscript //nologo C:\Windows\System32\slmgr.vbs -skms %KMS_Sev%
+if %errorlevel% neq 0 (
+    echo [ERROR] 设置 KMS 服务器失败
+    exit /b 1
+)
+
+echo [ACTION] Activating Windows...
+cscript //nologo C:\Windows\System32\slmgr.vbs -ato
+if %errorlevel% neq 0 (
+    echo [ERROR] 系统激活失败，请检查网络或 KMS 服务器状态
+    exit /b 1
+)
+
+echo [ACTION] Displaying detailed license information...
+cscript //nologo C:\Windows\System32\slmgr.vbs -dlv
+
+exit /b
+
